@@ -1,0 +1,181 @@
+import pandas as pd
+import numpy as np
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import classification_report, confusion_matrix, f1_score
+from scipy.sparse import hstack
+import pickle
+
+class PhishingModelTrainer:
+    def __init__(self):
+        self.nb_model = None
+        self.lr_model = None
+        self.vectorizer = None
+        self.best_threshold = 0.75
+    
+    def prepare_features(self, df):
+        """Prepare feature matrices"""
+        print("Preparing features...")
+        
+        # Load TF-IDF vectorizer
+        with open('processed_data.pkl', 'rb') as f:
+            temp_df = pickle.load(f)
+        
+        from data_preprocessing import DataPreprocessor
+        preprocessor = DataPreprocessor()
+        X_text = preprocessor.create_tfidf_features(df['combined_text'])
+        self.vectorizer = preprocessor.vectorizer
+        
+        # Numerical features
+        numerical_features = df[['subject_length', 'body_length', 'url_count', 'exclamation_count']]
+        
+        # Trust scores (YOUR INNOVATION!)
+        trust_scores = df[['urgency_index', 'authenticity_score', 'manipulation_index']]
+        
+        # Combine all features
+        X_combined = hstack([X_text, numerical_features.values, trust_scores.values])
+        
+        print(f"Feature matrix shape: {X_combined.shape}")
+        print(f"  - TF-IDF features: {X_text.shape[1]}")
+        print(f"  - Numerical features: {numerical_features.shape[1]}")
+        print(f"  - Trust scores: {trust_scores.shape[1]}")
+        
+        return X_combined, X_text, numerical_features, trust_scores
+    
+    def train_individual_models(self, X_train, y_train, X_val, y_val):
+        """Train Naive Bayes and Logistic Regression models"""
+        print("Training individual models...")
+        
+        # Train Naive Bayes
+        print("Training Naive Bayes...")
+        nb_params = {'alpha': [0.1, 0.5, 1.0, 2.0]}
+        nb_grid = GridSearchCV(MultinomialNB(), nb_params, cv=3, scoring='f1')
+        nb_grid.fit(X_train, y_train)
+        self.nb_model = nb_grid.best_estimator_
+        
+        # Train Logistic Regression
+        print("Training Logistic Regression...")
+        lr_params = {'C': [0.1, 1.0, 10.0], 'class_weight': ['balanced']}
+        lr_grid = GridSearchCV(LogisticRegression(max_iter=1000), lr_params, cv=3, scoring='f1')
+        lr_grid.fit(X_train, y_train)
+        self.lr_model = lr_grid.best_estimator_
+        
+        # Evaluate individual models
+        nb_pred = self.nb_model.predict(X_val)
+        lr_pred = self.lr_model.predict(X_val)
+        
+        print(f"\nNaive Bayes F1-score: {f1_score(y_val, nb_pred):.3f}")
+        print(f"Logistic Regression F1-score: {f1_score(y_val, lr_pred):.3f}")
+        
+        return self.nb_model, self.lr_model
+    
+    def smart_ensemble_predict(self, X, confidence_threshold=0.75):
+        """
+        INNOVATION: Smart voting based on confidence, not just accuracy
+        """
+        # Get probabilities from both models
+        nb_proba = self.nb_model.predict_proba(X)[:, 1]  # Probability of phishing
+        lr_proba = self.lr_model.predict_proba(X)[:, 1]  # Probability of phishing
+        
+        predictions = []
+        confidences = []
+        
+        for nb_prob, lr_prob in zip(nb_proba, lr_proba):
+            # Calculate confidence (distance from uncertain 0.5)
+            nb_confidence = abs(nb_prob - 0.5) * 2
+            lr_confidence = abs(lr_prob - 0.5) * 2
+            
+            # Both confident and agree
+            if (nb_confidence > confidence_threshold and 
+                lr_confidence > confidence_threshold and
+                (nb_prob > 0.5) == (lr_prob > 0.5)):
+                final_pred = 1 if nb_prob > 0.5 else 0
+                final_conf = max(nb_confidence, lr_confidence)
+            
+            # Disagreement or low confidence: trust more confident model
+            elif nb_confidence > lr_confidence:
+                final_pred = 1 if nb_prob > 0.5 else 0
+                final_conf = nb_confidence
+            else:
+                final_pred = 1 if lr_prob > 0.5 else 0
+                final_conf = lr_confidence
+            
+            predictions.append(final_pred)
+            confidences.append(final_conf)
+        
+        return np.array(predictions), np.array(confidences)
+    
+    def optimize_ensemble_threshold(self, X_val, y_val):
+        """Find optimal confidence threshold for ensemble"""
+        print("Optimizing ensemble threshold...")
+        
+        best_threshold = 0.5
+        best_f1 = 0.0
+        
+        for threshold in np.arange(0.5, 0.95, 0.05):
+            ensemble_pred, _ = self.smart_ensemble_predict(X_val, threshold)
+            f1 = f1_score(y_val, ensemble_pred)
+            
+            if f1 > best_f1:
+                best_f1 = f1
+                best_threshold = threshold
+        
+        self.best_threshold = best_threshold
+        print(f"Best threshold: {best_threshold:.2f} with F1-score: {best_f1:.3f}")
+        
+        return best_threshold
+    
+    def save_models(self):
+        """Save trained models"""
+        with open('trained_models.pkl', 'wb') as f:
+            pickle.dump({
+                'nb_model': self.nb_model,
+                'lr_model': self.lr_model,
+                'vectorizer': self.vectorizer,
+                'best_threshold': self.best_threshold
+            }, f)
+        print("Models saved to trained_models.pkl")
+
+if __name__ == "__main__":
+    # Load data with trust scores
+    with open('data_with_trust_scores.pkl', 'rb') as f:
+        df = pickle.load(f)
+    
+    # Prepare target variable (adjust column name as needed)
+    if 'label' in df.columns:
+        y = df['label'].apply(lambda x: 1 if str(x).lower() in ['phishing', '1', 'spam'] else 0)
+    else:
+        print("Warning: No label column found. Creating random labels for demonstration.")
+        y = np.random.choice([0, 1], size=len(df))
+    
+    # Initialize trainer
+    trainer = PhishingModelTrainer()
+    
+    # Prepare features
+    X, X_text, num_features, trust_scores = trainer.prepare_features(df)
+    
+    # Split data
+    X_train, X_temp, y_train, y_temp = train_test_split(X, y, test_size=0.4, stratify=y, random_state=42)
+    X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, stratify=y_temp, random_state=42)
+    
+    # Train models
+    nb_model, lr_model = trainer.train_individual_models(X_train, y_train, X_val, y_val)
+    
+    # Optimize ensemble
+    best_threshold = trainer.optimize_ensemble_threshold(X_val, y_val)
+    
+    # Final evaluation on test set
+    ensemble_pred, ensemble_conf = trainer.smart_ensemble_predict(X_test, best_threshold)
+    
+    print("\n" + "="*50)
+    print("FINAL TEST SET RESULTS:")
+    print("="*50)
+    print(f"Ensemble F1-score: {f1_score(y_test, ensemble_pred):.3f}")
+    print(f"Average confidence: {ensemble_conf.mean():.3f}")
+    print("\nClassification Report:")
+    print(classification_report(y_test, ensemble_pred, target_names=['Legitimate', 'Phishing']))
+    
+    # Save models
+    trainer.save_models()
+    print("\nTraining complete!")
