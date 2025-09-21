@@ -1,7 +1,8 @@
 #Model_training.py
 import pandas as pd
 import numpy as np
-from sklearn.naive_bayes import MultinomialNB
+from sklearn.naive_bayes import MultinomialNB, GaussianNB
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import classification_report, confusion_matrix, f1_score
@@ -13,20 +14,24 @@ class PhishingModelTrainer:
         self.nb_model = None
         self.lr_model = None
         self.vectorizer = None
+        self.scaler = None
         self.best_threshold = 0.75
     
-    def prepare_features(self, df):
+    def prepare_features(self, df, is_training=True):
         """Prepare feature matrices"""
         print("Preparing features...")
         
-        # Load TF-IDF vectorizer
-        with open('processed_data.pkl', 'rb') as f:
-            temp_df = pickle.load(f)
-        
         from data_preprocessing import DataPreprocessor
         preprocessor = DataPreprocessor()
-        X_text = preprocessor.create_tfidf_features(df['combined_text'])
-        self.vectorizer = preprocessor.vectorizer
+        
+        # Create TF-IDF features
+        if is_training:
+            X_text = preprocessor.create_tfidf_features(df['combined_text'])
+            self.vectorizer = preprocessor.vectorizer
+        else:
+            # Use existing vectorizer for test data
+            preprocessor.vectorizer = self.vectorizer
+            X_text = preprocessor.create_tfidf_features(df['combined_text'])
         
         # Numerical features
         numerical_features = df[['subject_length', 'body_length', 'url_count', 'exclamation_count']]
@@ -34,13 +39,24 @@ class PhishingModelTrainer:
         # Trust scores (YOUR INNOVATION!)
         trust_scores = df[['urgency_index', 'authenticity_score', 'manipulation_index']]
         
+        # Combine numerical and trust score features
+        combined_dense_features = np.hstack([numerical_features.values, trust_scores.values])
+        
+        # Scale the dense features to ensure non-negative values for MultinomialNB
+        if is_training:
+            self.scaler = MinMaxScaler()
+            combined_dense_features_scaled = self.scaler.fit_transform(combined_dense_features)
+        else:
+            combined_dense_features_scaled = self.scaler.transform(combined_dense_features)
+        
         # Combine all features
-        X_combined = hstack([X_text, numerical_features.values, trust_scores.values])
+        X_combined = hstack([X_text, combined_dense_features_scaled])
         
         print(f"Feature matrix shape: {X_combined.shape}")
         print(f"  - TF-IDF features: {X_text.shape[1]}")
         print(f"  - Numerical features: {numerical_features.shape[1]}")
         print(f"  - Trust scores: {trust_scores.shape[1]}")
+        print(f"  - All dense features range: [{combined_dense_features_scaled.min():.3f}, {combined_dense_features_scaled.max():.3f}]")
         
         return X_combined, X_text, numerical_features, trust_scores
     
@@ -134,6 +150,7 @@ class PhishingModelTrainer:
                 'nb_model': self.nb_model,
                 'lr_model': self.lr_model,
                 'vectorizer': self.vectorizer,
+                'scaler': self.scaler,
                 'best_threshold': self.best_threshold
             }, f)
         print("Models saved to trained_models.pkl")

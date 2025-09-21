@@ -57,13 +57,35 @@ def main():
     # Step 3: Prepare data for training
     print("Step 3: Preparing features...")
     
-    # Create target variable (adjust based on your label column)
-    y = df['label'].apply(lambda x: 1 if str(x).lower() in ['phishing', '1', 'spam'] else 0)
-    print(f"Labels: {y.sum()} phishing, {len(y)-y.sum()} legitimate")
+    # Create target variable - since all your emails are phishing, create some artificial legitimate ones for training
+    print("⚠️  Dataset contains only phishing emails. Creating balanced dataset for training...")
+    
+    # For demonstration purposes, let's create a balanced dataset
+    # In a real scenario, you'd have both phishing and legitimate emails
+    phishing_df = df.copy()
+    
+    # Create some "legitimate" emails by modifying phishing ones (this is just for training)
+    # In practice, you'd have real legitimate emails
+    legitimate_df = df.sample(n=min(500, len(df)//2), random_state=42).copy()
+    
+    # Modify trust scores to simulate legitimate emails (lower threat indicators)
+    legitimate_df['urgency_index'] = legitimate_df['urgency_index'] * 0.3
+    legitimate_df['manipulation_index'] = legitimate_df['manipulation_index'] * 0.2
+    legitimate_df['authenticity_score'] = legitimate_df['authenticity_score'] + 0.5
+    
+    # Create labels
+    phishing_df['target'] = 1
+    legitimate_df['target'] = 0
+    
+    # Combine datasets
+    balanced_df = pd.concat([phishing_df, legitimate_df], ignore_index=True).sample(frac=1, random_state=42).reset_index(drop=True)
+    
+    y = balanced_df['target']
+    print(f"Balanced dataset: {y.sum()} phishing, {len(y)-y.sum()} legitimate")
     
     # Split data
     X_train, X_test, y_train, y_test = train_test_split(
-        df, y, test_size=0.3, random_state=42, stratify=y
+        balanced_df, y, test_size=0.3, random_state=42, stratify=y
     )
     print(f"Training: {len(X_train)}, Testing: {len(X_test)}\n")
     
@@ -71,9 +93,11 @@ def main():
     print("Step 4: Training models...")
     trainer = PhishingModelTrainer()
     
-    # Prepare features
-    X_train_features, _, _, _ = trainer.prepare_features(X_train)
-    X_test_features, _, _, _ = trainer.prepare_features(X_test)
+    # Prepare features (training data)
+    X_train_features, _, _, _ = trainer.prepare_features(X_train, is_training=True)
+    
+    # Prepare features (test data) - using existing scaler and vectorizer
+    X_test_features, _, _, _ = trainer.prepare_features(X_test, is_training=False)
     
     # Train individual models
     nb_model, lr_model = trainer.train_individual_models(
@@ -117,6 +141,7 @@ def main():
     trust_calc.save_weights()
     
     print("Done! Models saved to 'trained_models.pkl' and 'learned_weights.pkl'")
+    print("\n💡 Note: This demo used artificial legitimate emails. In practice, use real legitimate emails for better results.")
 
 if __name__ == "__main__":
     main()

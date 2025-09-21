@@ -60,6 +60,23 @@ class TrustScoreCalculator:
             print(f"Warning: Column '{target_column}' not found. Using random labels for demonstration.")
             labels = np.random.choice([0, 1], size=len(df))
         
+        # Check if all labels are the same
+        if labels.nunique() <= 1:
+            print(f"Warning: All emails have the same label ({labels.iloc[0]}). Cannot learn correlations.")
+            print("Using default phishing-oriented weights...")
+            # Use default weights that favor phishing detection
+            self.learned_weights = {
+                'urgency_words': 2.0,
+                'time_phrases': 1.5,
+                'threat_language': 2.5,
+                'professional_words': -1.0,  # negative because legitimate emails are more professional
+                'unprofessional_words': 1.0,
+                'fear_words': 3.0,
+                'reward_words': 2.0,
+                'authority_words': 1.5
+            }
+            return self.learned_weights
+        
         # Calculate correlations and learn weights
         learned_weights = {}
         print("\nLearned Feature Correlations:")
@@ -67,14 +84,20 @@ class TrustScoreCalculator:
         
         for feature in features_df.columns:
             if feature != 'total_words' and features_df[feature].var() > 0:
-                correlation, p_value = pearsonr(features_df[feature], labels)
-                if p_value < 0.05:  # Statistically significant
-                    learned_weights[feature] = correlation
-                    significance = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*"
-                    print(f"{feature:20s}: {correlation:+.3f} {significance}")
-                else:
-                    learned_weights[feature] = 0.0  # Not significant
-                    print(f"{feature:20s}: {correlation:+.3f} (not significant)")
+                try:
+                    correlation, p_value = pearsonr(features_df[feature], labels)
+                    if p_value < 0.05:  # Statistically significant
+                        learned_weights[feature] = correlation
+                        significance = "***" if p_value < 0.001 else "**" if p_value < 0.01 else "*"
+                        print(f"{feature:20s}: {correlation:+.3f} {significance}")
+                    else:
+                        learned_weights[feature] = 0.0  # Not significant
+                        print(f"{feature:20s}: {correlation:+.3f} (not significant)")
+                except:
+                    learned_weights[feature] = 0.0
+                    print(f"{feature:20s}: Cannot calculate correlation")
+            else:
+                learned_weights[feature] = 0.0
         
         self.learned_weights = learned_weights
         return learned_weights
@@ -102,9 +125,9 @@ class TrustScoreCalculator:
         ) / features['total_words']
         
         return {
-            'urgency_index': urgency_index,
+            'urgency_index': max(0, urgency_index),  # Ensure non-negative
             'authenticity_score': authenticity_score,
-            'manipulation_index': manipulation_index
+            'manipulation_index': max(0, manipulation_index)  # Ensure non-negative
         }
     
     def add_trust_scores_to_dataframe(self, df):

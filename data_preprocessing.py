@@ -47,6 +47,26 @@ class DataPreprocessor:
         df = df[df['combined_text'].str.len() >= 5].reset_index(drop=True)
         return df
 
+    def create_tfidf_features(self, text_data):
+        """Create TF-IDF features from text data"""
+        print("Creating TF-IDF features...")
+        
+        if self.vectorizer is None:
+            # Create and fit new vectorizer
+            self.vectorizer = TfidfVectorizer(
+                max_features=1000,
+                stop_words='english',
+                ngram_range=(1, 2),
+                min_df=2
+            )
+            X_tfidf = self.vectorizer.fit_transform(text_data)
+        else:
+            # Use existing vectorizer (for test data)
+            X_tfidf = self.vectorizer.transform(text_data)
+        
+        print(f"TF-IDF matrix shape: {X_tfidf.shape}")
+        return X_tfidf
+
     def extract_basic_features(self, df):
         """Extract basic numerical features"""
         print("Extracting basic features...")
