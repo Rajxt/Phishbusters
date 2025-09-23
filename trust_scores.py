@@ -38,10 +38,7 @@ class TrustScoreCalculator:
         return features
     
     def learn_optimal_weights(self, df, target_column='label'):
-        """
-        INNOVATION: Learn optimal weights from correlation analysis
-        This replaces your hardcoded weights (×2, ×3, ×4) with data-driven weights!
-        """
+     
         print("Learning optimal weights from training data...")
         
         # Extract features for all emails

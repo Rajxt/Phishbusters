@@ -36,13 +36,13 @@ class PhishingModelTrainer:
         # Numerical features
         numerical_features = df[['subject_length', 'body_length', 'url_count', 'exclamation_count']]
         
-        # Trust scores (YOUR INNOVATION!)
+        # Trust scores 
         trust_scores = df[['urgency_index', 'authenticity_score', 'manipulation_index']]
         
         # Combine numerical and trust score features
         combined_dense_features = np.hstack([numerical_features.values, trust_scores.values])
         
-        # Scale the dense features to ensure non-negative values for MultinomialNB
+        # Scale features to ensure non-negative values NB
         if is_training:
             self.scaler = MinMaxScaler()
             combined_dense_features_scaled = self.scaler.fit_transform(combined_dense_features)
@@ -89,7 +89,7 @@ class PhishingModelTrainer:
     
     def smart_ensemble_predict(self, X, confidence_threshold=0.75):
         """
-        INNOVATION: Smart voting based on confidence, not just accuracy
+        Smart voting based on confidence,
         """
         # Get probabilities from both models
         nb_proba = self.nb_model.predict_proba(X)[:, 1]  # Probability of phishing
