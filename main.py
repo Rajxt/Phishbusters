@@ -1,7 +1,7 @@
-# main.py - Simple University Project Version
+# main_fixed.py - Corrected Training Script
 """
-Phishing Detection System - University Project
-- Load data → Preprocess → Calculate trust scores → Train models → Test
+Fixed Phishing Detection System - University Project
+- Properly handles datasets with both phishing (1) and legitimate (0) emails
 """
 
 import pandas as pd
@@ -17,7 +17,7 @@ from model_training import PhishingModelTrainer
 from evaluation import ModelEvaluator
 
 def main():
-    print("=== PHISHING DETECTION SYSTEM ===")
+    print("=== PHISHING DETECTION SYSTEM (FIXED) ===")
     print("University Project - Trust Scores + Smart Ensemble\n")
     
     # Step 1: Load and preprocess data
@@ -25,7 +25,7 @@ def main():
     preprocessor = DataPreprocessor()
     
     # Load your CSV file here - UPDATE THIS PATH!
-    csv_file = "datasets/Nazario.csv"  # Put your actual CSV filename here
+    csv_file = "datasets/phisingdataset.csv"  # Put your actual CSV filename here
     
     # Check if file exists
     import os
@@ -41,56 +41,69 @@ def main():
     df = preprocessor.load_and_clean_data(csv_file)
     df = preprocessor.clean_text(df)
     df = preprocessor.extract_basic_features(df)
-    print(f"Loaded {len(df)} emails\n")
     
-    # Step 2: Calculate trust scores (THE INNOVATION!)
-    print("Step 2: Calculating trust scores...")
+    # Step 2: Properly handle labels
+    print("Step 2: Processing labels...")
+    
+    # Convert labels to binary (1 = phishing, 0 = legitimate)
+    df['target'] = df['label'].astype(int)  # Since your labels are already 0/1
+    
+    print(f"Label distribution:")
+    print(f"Phishing (1): {(df['target'] == 1).sum()}")
+    print(f"Legitimate (0): {(df['target'] == 0).sum()}")
+    
+    # Check if we have both classes
+    if df['target'].nunique() == 1:
+        print("❌ Error: Dataset contains only one class!")
+        print("Cannot train a classifier with only one class.")
+        print("Please use a dataset that contains both phishing and legitimate emails.")
+        return
+    
+    # Balance the dataset if needed (optional)
+    phishing_count = (df['target'] == 1).sum()
+    legit_count = (df['target'] == 0).sum()
+    
+    if abs(phishing_count - legit_count) > max(phishing_count, legit_count) * 0.5:
+        print(f"Dataset is imbalanced. Balancing...")
+        min_count = min(phishing_count, legit_count)
+        
+        phishing_df = df[df['target'] == 1].sample(n=min_count, random_state=42)
+        legit_df = df[df['target'] == 0].sample(n=min_count, random_state=42)
+        
+        df = pd.concat([phishing_df, legit_df], ignore_index=True).sample(frac=1, random_state=42).reset_index(drop=True)
+        print(f"Balanced dataset: {(df['target'] == 1).sum()} phishing, {(df['target'] == 0).sum()} legitimate")
+    
+    # Step 3: Calculate trust scores (THE INNOVATION!)
+    print("\nStep 3: Calculating trust scores...")
     trust_calc = TrustScoreCalculator()
     
-    # Learn weights from data
-    learned_weights = trust_calc.learn_optimal_weights(df, 'label')
+    # Learn weights from data - this will work properly now with real data
+    learned_weights = trust_calc.learn_optimal_weights(df, 'target')
     
     # Add trust scores to dataframe
     df = trust_calc.add_trust_scores_to_dataframe(df)
-    print("Trust scores calculated!\n")
+    print("Trust scores calculated!")
     
-    # Step 3: Prepare data for training
-    print("Step 3: Preparing features...")
+    # Show trust score statistics by class
+    print("\nTrust Score Statistics:")
+    print("Legitimate emails (0):")
+    legitimate_stats = df[df['target'] == 0][['urgency_index', 'authenticity_score', 'manipulation_index']].describe()
+    print(legitimate_stats)
     
-    # Create target variable - since all your emails are phishing, create some artificial legitimate ones for training
-    print("⚠️  Dataset contains only phishing emails. Creating balanced dataset for training...")
+    print("\nPhishing emails (1):")
+    phishing_stats = df[df['target'] == 1][['urgency_index', 'authenticity_score', 'manipulation_index']].describe()
+    print(phishing_stats)
     
-    # For demonstration purposes, let's create a balanced dataset
-    # In a real scenario, you'd have both phishing and legitimate emails
-    phishing_df = df.copy()
-    
-    # Create some "legitimate" emails by modifying phishing ones (this is just for training)
-    # In practice, you'd have real legitimate emails
-    legitimate_df = df.sample(n=min(500, len(df)//2), random_state=42).copy()
-    
-    # Modify trust scores to simulate legitimate emails (lower threat indicators)
-    legitimate_df['urgency_index'] = legitimate_df['urgency_index'] * 0.3
-    legitimate_df['manipulation_index'] = legitimate_df['manipulation_index'] * 0.2
-    legitimate_df['authenticity_score'] = legitimate_df['authenticity_score'] + 0.5
-    
-    # Create labels
-    phishing_df['target'] = 1
-    legitimate_df['target'] = 0
-    
-    # Combine datasets
-    balanced_df = pd.concat([phishing_df, legitimate_df], ignore_index=True).sample(frac=1, random_state=42).reset_index(drop=True)
-    
-    y = balanced_df['target']
-    print(f"Balanced dataset: {y.sum()} phishing, {len(y)-y.sum()} legitimate")
-    
-    # Split data
+    # Step 4: Split data properly
+    print("\nStep 4: Splitting data...")
     X_train, X_test, y_train, y_test = train_test_split(
-        balanced_df, y, test_size=0.3, random_state=42, stratify=y
+        df, df['target'], test_size=0.3, random_state=42, stratify=df['target']
     )
-    print(f"Training: {len(X_train)}, Testing: {len(X_test)}\n")
+    print(f"Training: {len(X_train)} (Phishing: {(y_train == 1).sum()}, Legitimate: {(y_train == 0).sum()})")
+    print(f"Testing: {len(X_test)} (Phishing: {(y_test == 1).sum()}, Legitimate: {(y_test == 0).sum()})")
     
-    # Step 4: Train models
-    print("Step 4: Training models...")
+    # Step 5: Train models
+    print("\nStep 5: Training models...")
     trainer = PhishingModelTrainer()
     
     # Prepare features (training data)
@@ -106,10 +119,10 @@ def main():
     
     # Optimize ensemble
     best_threshold = trainer.optimize_ensemble_threshold(X_test_features, y_test)
-    print("Models trained!\n")
+    print("Models trained!")
     
-    # Step 5: Final evaluation
-    print("Step 5: Final Results")
+    # Step 6: Final evaluation
+    print("\nStep 6: Final Results")
     print("="*40)
     
     # Get ensemble predictions
@@ -125,23 +138,52 @@ def main():
     
     # Show some example predictions
     print("\nExample Predictions:")
-    print("-"*50)
-    for i in range(min(5, len(X_test))):
-        email_text = X_test.iloc[i]['combined_text'][:100] + "..."
+    print("-"*70)
+    for i in range(min(10, len(X_test))):
+        email_text = X_test.iloc[i]['combined_text'][:80] + "..."
         actual = "Phishing" if y_test.iloc[i] == 1 else "Legitimate" 
         predicted = "Phishing" if ensemble_pred[i] == 1 else "Legitimate"
         confidence = ensemble_conf[i]
+        correct = "✓" if (y_test.iloc[i] == ensemble_pred[i]) else "✗"
         
-        print(f"Email {i+1}: {email_text}")
-        print(f"Actual: {actual} | Predicted: {predicted} | Confidence: {confidence:.2f}")
+        print(f"{correct} Email {i+1}: {email_text}")
+        print(f"   Actual: {actual} | Predicted: {predicted} | Confidence: {confidence:.2f}")
         print()
+    
+    # Calculate accuracy
+    accuracy = (y_test == ensemble_pred).mean()
+    print(f"Overall Accuracy: {accuracy:.1%}")
     
     # Save models for later use
     trainer.save_models()
     trust_calc.save_weights()
     
-    print("Done! Models saved to 'trained_models.pkl' and 'learned_weights.pkl'")
-    print("\n💡 Note: This demo used artificial legitimate emails. In practice, use real legitimate emails for better results.")
+    print("\n✅ Training complete! Models saved.")
+    print("You can now use 'predict_email.py' to test individual emails.")
+
+def quick_data_check():
+    """Quick function to check your data format"""
+    csv_file = "datasets/Nazario.csv"  # Update this
+    
+    try:
+        df = pd.read_csv(csv_file)
+        print("Dataset Summary:")
+        print(f"Shape: {df.shape}")
+        print(f"Columns: {df.columns.tolist()}")
+        print(f"\nLabel distribution:")
+        print(df['label'].value_counts())
+        print(f"\nSample rows:")
+        print(df[['subject', 'label']].head())
+        
+        # Check for missing values
+        print(f"\nMissing values:")
+        print(df.isnull().sum())
+        
+    except Exception as e:
+        print(f"Error reading file: {e}")
 
 if __name__ == "__main__":
+
+    quick_data_check()
+    
     main()

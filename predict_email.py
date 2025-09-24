@@ -204,52 +204,17 @@ def interactive_mode():
     
     while True:
         print("\nChoose an option:")
-        print("1. Test a sample phishing email")
-        print("2. Test a sample legitimate email")
-        print("3. Enter your own email")
-        print("4. Load email from file")
-        print("5. Quick test (just subject and body)")
-        print("6. Exit")
+        print("1. Enter your own email")
+        print("2. Load email from file")
+        print("3. Quick test (just subject and body)")
+        print("4. Exit")
         
-        choice = input("\nEnter choice (1-6): ")
+        choice = input("\nEnter choice (1-4): ")
         
+        
+    
+            
         if choice == '1':
-            # Sample phishing email
-            sender = "security@amaz0n-verify.com"
-            subject = "Urgent: Your Account Will Be Suspended!"
-            body = """Dear Customer,
-
-We have detected unusual activity on your account. Your account will be SUSPENDED within 24 hours unless you verify your information immediately.
-
-Click here to verify your account: http://bit.ly/verify-account
-
-This is a time-sensitive matter. Act now to avoid losing access to your account and all your purchases.
-
-If you don't respond within 24 hours, your account will be permanently deleted.
-
-Amazon Security Team
-(This is an automated message, do not reply)"""
-            
-            predictor.analyze_email(sender, subject, body, "http://bit.ly/verify-account")
-            
-        elif choice == '2':
-            # Sample legitimate email
-            sender = "noreply@github.com"
-            subject = "Your GitHub repository has a new star"
-            body = """Hi there,
-
-Someone just starred your repository 'phishing-detector'. Your project now has 5 stars.
-
-Keep up the great work!
-
-Best regards,
-The GitHub Team
-
-To manage your notification settings, visit your account preferences."""
-            
-            predictor.analyze_email(sender, subject, body)
-            
-        elif choice == '3':
             print("\nEnter email details:")
             sender = input("From (email address): ")
             subject = input("Subject: ")
@@ -265,7 +230,7 @@ To manage your notification settings, visit your account preferences."""
             
             predictor.analyze_email(sender, subject, body, urls)
             
-        elif choice == '4':
+        elif choice == '2':
             filename = input("Enter filename: ")
             try:
                 with open(filename, 'r') as f:
@@ -274,13 +239,13 @@ To manage your notification settings, visit your account preferences."""
             except Exception as e:
                 print(f"Error reading file: {e}")
                 
-        elif choice == '5':
+        elif choice == '3':
             print("\nQuick Test Mode:")
             subject = input("Subject: ")
             body = input("Body: ")
             predictor.analyze_email("unknown@example.com", subject, body)
             
-        elif choice == '6':
+        elif choice == '4':
             print("Goodbye!")
             break
         else:
