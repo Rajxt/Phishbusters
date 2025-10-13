@@ -1,7 +1,6 @@
-# predict_email.py - Test emails against your trained model
+# predict_email.py - DEBUGGING VERSION
 """
-Phishing Detection System - Email Predictor
-Use this to test individual emails and see if they're phishing or legitimate
+Phishing Detection System - Email Predictor with Enhanced Debugging
 """
 
 import pandas as pd
@@ -44,6 +43,47 @@ class PhishingPredictor:
             print("Make sure you've run main.py first to train the models!")
             return False
     
+    def load_csv_with_encoding(self, csv_file):
+        """Load CSV file with automatic encoding detection"""
+        print(f"\n🔍 Attempting to load: {csv_file}")
+        encodings_to_try = ['utf-8', 'latin-1', 'windows-1252', 'iso-8859-1', 'cp1252']
+        
+        for encoding in encodings_to_try:
+            try:
+                df = pd.read_csv(csv_file, encoding=encoding)
+                print(f"✓ Successfully loaded file with {encoding} encoding")
+                print(f"   Shape: {df.shape}")
+                print(f"   Columns: {df.columns.tolist()}")
+                return df
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                print(f"   Error with {encoding}: {e}")
+                continue
+        
+        # If all standard encodings fail, try with error handling
+        try:
+            df = pd.read_csv(csv_file, encoding='utf-8', errors='ignore')
+            print("✓ Loaded file with UTF-8 encoding (ignoring errors)")
+            print(f"   Shape: {df.shape}")
+            print(f"   Columns: {df.columns.tolist()}")
+            return df
+        except:
+            # Last resort
+            try:
+                import chardet
+                with open(csv_file, 'rb') as f:
+                    result = chardet.detect(f.read(100000))
+                    detected_encoding = result['encoding']
+                    print(f"   Detected encoding: {detected_encoding}")
+                    return pd.read_csv(csv_file, encoding=detected_encoding)
+            except:
+                df = pd.read_csv(csv_file, encoding='latin-1', errors='replace')
+                print("✓ Loaded with latin-1 encoding (with replacements)")
+                print(f"   Shape: {df.shape}")
+                print(f"   Columns: {df.columns.tolist()}")
+                return df
+    
     def prepare_email(self, sender, subject, body, urls=""):
         """Prepare a single email for prediction"""
         # Create DataFrame with single email
@@ -52,7 +92,7 @@ class PhishingPredictor:
             'subject': subject if subject else 'no_subject',
             'body': body if body else 'no_body',
             'urls': urls,
-            'label': 'unknown'  # placeholder
+            'label': 0  # placeholder, won't be used
         }])
         
         # Preprocess
@@ -113,82 +153,202 @@ class PhishingPredictor:
                 'manipulation': email_data['manipulation_index'].values[0]
             }
         }
+
+
+def batch_test():
+    """Test multiple emails from a CSV file - ENHANCED DEBUG VERSION"""
+    predictor = PhishingPredictor()
     
-    def analyze_email_text(self, email_text):
-        """Analyze a single email provided as text"""
-        # Parse email text (simple parsing - you can enhance this)
-        lines = email_text.strip().split('\n')
-        
-        sender = "unknown@example.com"
-        subject = ""
-        body = ""
-        
-        # Simple parsing logic
-        in_body = False
-        for line in lines:
-            if line.lower().startswith('from:'):
-                sender = line[5:].strip()
-            elif line.lower().startswith('subject:'):
-                subject = line[8:].strip()
-            elif line.strip() == "" and subject:
-                in_body = True
-            elif in_body:
-                body += line + " "
-        
-        # If no structured format, treat entire text as body
-        if not body:
-            body = email_text
-        
-        return self.analyze_email(sender, subject, body)
+    if not predictor.load_models():
+        return
     
-    def analyze_email(self, sender, subject, body, urls=""):
-        """Full analysis of an email"""
-        # Prepare email
-        email_data = self.prepare_email(sender, subject, body, urls)
+    csv_file = input("Enter CSV filename with emails to test: ").strip()
+    
+    if not os.path.exists(csv_file):
+        print(f"❌ File not found: {csv_file}")
+        return
+    
+    try:
+        # Load CSV with encoding detection
+        df = predictor.load_csv_with_encoding(csv_file)
+        print(f"\n✓ Loaded {len(df)} rows from CSV")
         
-        # Get prediction
-        result = self.predict_email(email_data)
+        # DEBUG: Show first few rows
+        print("\n📊 First 3 rows of data:")
+        print(df.head(3))
         
-        # Display results
-        print("\n" + "="*60)
-        print("PHISHING DETECTION ANALYSIS RESULTS")
-        print("="*60)
+        # DEBUG: Check for required columns
+        print("\n🔍 Checking for required columns:")
+        required_cols = ['sender', 'subject', 'body']
+        for col in required_cols:
+            if col in df.columns:
+                non_null = df[col].notna().sum()
+                print(f"   ✓ '{col}' found ({non_null}/{len(df)} non-null values)")
+            else:
+                print(f"   ⚠️  '{col}' NOT found")
         
-        print(f"\n📧 EMAIL DETAILS:")
-        print(f"From: {sender}")
-        print(f"Subject: {subject[:100]}...")
-        print(f"Body preview: {body[:200]}...")
+        # Handle missing columns
+        if 'sender' not in df.columns:
+            print("   → Adding default 'sender' column")
+            df['sender'] = 'unknown@example.com'
+        if 'subject' not in df.columns:
+            print("   → Adding default 'subject' column")
+            df['subject'] = ''
+        if 'body' not in df.columns:
+            print("   → Adding default 'body' column")
+            df['body'] = ''
+        if 'urls' not in df.columns:
+            df['urls'] = ''
         
-        print(f"\n🔍 ANALYSIS RESULTS:")
-        print(f"Verdict: {result['prediction']}")
-        print(f"Confidence: {result['confidence']:.1%}")
+        # Fill NaN values
+        df['sender'] = df['sender'].fillna('unknown@example.com')
+        df['subject'] = df['subject'].fillna('')
+        df['body'] = df['body'].fillna('')
+        df['urls'] = df['urls'].fillna('')
         
-        print(f"\n📊 MODEL PREDICTIONS:")
-        print(f"Naive Bayes: {result['nb_probability']:.1%} phishing probability")
-        print(f"Logistic Regression: {result['lr_probability']:.1%} phishing probability")
+        # Clean any encoding issues in the text data
+        print("\n🧹 Cleaning text data...")
+        for col in ['subject', 'body']:
+            if col in df.columns:
+                df[col] = df[col].apply(
+                    lambda x: str(x).encode('ascii', 'ignore').decode('ascii') if pd.notna(x) else ''
+                )
         
-        print(f"\n🧠 PSYCHOLOGICAL TRUST SCORES:")
-        print(f"Urgency Index: {result['trust_scores']['urgency']:.3f}")
-        print(f"Authenticity Score: {result['trust_scores']['authenticity']:.3f}")
-        print(f"Manipulation Index: {result['trust_scores']['manipulation']:.3f}")
+        print(f"✓ Data preparation complete. Processing {len(df)} emails...\n")
         
-        print(f"\n🎯 INTERPRETATION:")
-        if result['prediction'] == 'PHISHING':
-            print("⚠️  This email shows characteristics of a phishing attempt!")
-            print("Reasons:")
-            if result['trust_scores']['urgency'] > 0.1:
-                print("  • High urgency language detected")
-            if result['trust_scores']['manipulation'] > 0.1:
-                print("  • Manipulative psychological tactics present")
-            if result['trust_scores']['authenticity'] < 0:
-                print("  • Low authenticity score")
+        results = []
+        correct_predictions = 0
+        total_predictions = 0
+        errors = []
+        
+        for idx, row in df.iterrows():
+            print(f"Processing email {idx+1}/{len(df)}...", end=' ')
+            
+            try:
+                email_data = predictor.prepare_email(
+                    row['sender'],
+                    row['subject'],
+                    row['body'],
+                    row['urls']
+                )
+                
+                result = predictor.predict_email(email_data)
+                
+                # Store results
+                prediction_result = {
+                    'index': idx,
+                    'subject': row['subject'][:50] if row['subject'] else 'No subject',
+                    'prediction': result['prediction'],
+                    'confidence': result['confidence'],
+                    'nb_prob': result['nb_probability'],
+                    'lr_prob': result['lr_probability']
+                }
+                
+                # Check if we have actual labels for accuracy calculation
+                if 'label' in row and pd.notna(row['label']):
+                    # Handle different label formats
+                    label_str = str(row['label']).lower().strip()
+                    if label_str in ['1', 'phishing', 'spam', 'true']:
+                        actual_label = 1
+                    elif label_str in ['0', 'legitimate', 'ham', 'false']:
+                        actual_label = 0
+                    else:
+                        actual_label = int(row['label']) if str(row['label']).isdigit() else None
+                    
+                    if actual_label is not None:
+                        prediction_result['actual'] = 'PHISHING' if actual_label == 1 else 'LEGITIMATE'
+                        
+                        # Check if prediction is correct
+                        predicted_label = 1 if result['prediction'] == 'PHISHING' else 0
+                        if predicted_label == actual_label:
+                            correct_predictions += 1
+                            print("✓")
+                        else:
+                            print("✗")
+                        total_predictions += 1
+                    else:
+                        prediction_result['actual'] = 'unknown'
+                        print("?")
+                else:
+                    prediction_result['actual'] = 'unknown'
+                    print("?")
+                
+                results.append(prediction_result)
+                
+            except Exception as e:
+                error_msg = f"Email {idx}: {str(e)}"
+                errors.append(error_msg)
+                print(f"❌ Error: {str(e)[:50]}")
+                continue
+        
+        # Save results
+        if len(results) > 0:
+            results_df = pd.DataFrame(results)
+            output_file = 'prediction_results.csv'
+            results_df.to_csv(output_file, index=False)
+            print(f"\n✓ Results saved to {output_file}")
         else:
-            print("✅ This email appears to be legitimate.")
-            print("However, always verify sender addresses and links before clicking!")
+            print("\n❌ No emails were successfully processed!")
+            if errors:
+                print("\nErrors encountered:")
+                for error in errors[:5]:  # Show first 5 errors
+                    print(f"  - {error}")
+            return
         
+        # Show summary
+        print("\n" + "="*60)
+        print("BATCH TESTING SUMMARY")
         print("="*60)
+        print(f"Total emails in CSV: {len(df)}")
+        print(f"Successfully processed: {len(results)}")
+        print(f"Failed to process: {len(errors)}")
         
-        return result
+        if total_predictions > 0:
+            accuracy = (correct_predictions / total_predictions) * 100
+            print(f"\nAccuracy: {accuracy:.1f}% ({correct_predictions}/{total_predictions} correct)")
+            
+            # Show confusion matrix
+            phishing_correct = sum(1 for r in results if r.get('actual') == 'PHISHING' and r['prediction'] == 'PHISHING')
+            phishing_wrong = sum(1 for r in results if r.get('actual') == 'PHISHING' and r['prediction'] == 'LEGITIMATE')
+            legit_correct = sum(1 for r in results if r.get('actual') == 'LEGITIMATE' and r['prediction'] == 'LEGITIMATE')
+            legit_wrong = sum(1 for r in results if r.get('actual') == 'LEGITIMATE' and r['prediction'] == 'PHISHING')
+            
+            print("\nConfusion Matrix:")
+            print("                 Predicted")
+            print("                 Legit  Phish")
+            print(f"Actual Legit  |  {legit_correct:4d}  {legit_wrong:4d}")
+            print(f"       Phish  |  {phishing_wrong:4d}  {phishing_correct:4d}")
+        else:
+            print("\n⚠️  No labeled data found - cannot calculate accuracy")
+        
+        # Show confidence statistics
+        if len(results) > 0:
+            avg_confidence = np.mean([r['confidence'] for r in results])
+            print(f"\nAverage confidence: {avg_confidence:.1%}")
+            
+            # Show prediction distribution
+            phishing_pred = sum(1 for r in results if r['prediction'] == 'PHISHING')
+            legit_pred = sum(1 for r in results if r['prediction'] == 'LEGITIMATE')
+            print(f"\nPredictions: {phishing_pred} Phishing, {legit_pred} Legitimate")
+            
+            # Show some examples
+            print("\nSample predictions (first 5):")
+            for i in range(min(5, len(results))):
+                r = results[i]
+                actual_str = f" | Actual: {r.get('actual', 'unknown'):10s}" if 'actual' in r else ""
+                print(f"  {i+1}. {r['subject'][:40]:40s} → {r['prediction']:10s} (Conf: {r['confidence']:.1%}){actual_str}")
+        
+        # Show errors if any
+        if errors:
+            print(f"\n⚠️  {len(errors)} errors occurred during processing")
+            print("First few errors:")
+            for error in errors[:3]:
+                print(f"  - {error}")
+            
+    except Exception as e:
+        print(f"\n❌ Error during batch testing: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def interactive_mode():
@@ -204,17 +364,31 @@ def interactive_mode():
     
     while True:
         print("\nChoose an option:")
-        print("1. Enter your own email")
-        print("2. Load email from file")
-        print("3. Quick test (just subject and body)")
-        print("4. Exit")
+        print("1. Test a quick email (just subject and body)")
+        print("2. Test with full details (sender, subject, body)")
+        print("3. Exit")
         
-        choice = input("\nEnter choice (1-4): ")
+        choice = input("\nEnter choice (1-3): ")
         
-        
-    
-            
         if choice == '1':
+            print("\nQuick Test Mode:")
+            subject = input("Subject: ")
+            body = input("Body: ")
+            
+            try:
+                email_data = predictor.prepare_email("unknown@example.com", subject, body)
+                result = predictor.predict_email(email_data)
+                
+                print("\n" + "="*60)
+                print(f"🔍 VERDICT: {result['prediction']}")
+                print(f"📊 Confidence: {result['confidence']:.1%}")
+                print(f"   NB Probability: {result['nb_probability']:.1%}")
+                print(f"   LR Probability: {result['lr_probability']:.1%}")
+                print("="*60)
+            except Exception as e:
+                print(f"❌ Error: {e}")
+            
+        elif choice == '2':
             print("\nEnter email details:")
             sender = input("From (email address): ")
             subject = input("Subject: ")
@@ -226,80 +400,30 @@ def interactive_mode():
                     break
                 body_lines.append(line)
             body = '\n'.join(body_lines)
-            urls = input("URLs in email (comma-separated, or press Enter for none): ")
+            urls = input("URLs in email (comma-separated, or press Enter): ")
             
-            predictor.analyze_email(sender, subject, body, urls)
-            
-        elif choice == '2':
-            filename = input("Enter filename: ")
             try:
-                with open(filename, 'r') as f:
-                    email_text = f.read()
-                predictor.analyze_email_text(email_text)
-            except Exception as e:
-                print(f"Error reading file: {e}")
+                email_data = predictor.prepare_email(sender, subject, body, urls)
+                result = predictor.predict_email(email_data)
                 
-        elif choice == '3':
-            print("\nQuick Test Mode:")
-            subject = input("Subject: ")
-            body = input("Body: ")
-            predictor.analyze_email("unknown@example.com", subject, body)
+                print("\n" + "="*60)
+                print(f"🔍 VERDICT: {result['prediction']}")
+                print(f"📊 Confidence: {result['confidence']:.1%}")
+                print(f"   NB Probability: {result['nb_probability']:.1%}")
+                print(f"   LR Probability: {result['lr_probability']:.1%}")
+                print("\n🧠 Trust Scores:")
+                print(f"   Urgency: {result['trust_scores']['urgency']:.3f}")
+                print(f"   Authenticity: {result['trust_scores']['authenticity']:.3f}")
+                print(f"   Manipulation: {result['trust_scores']['manipulation']:.3f}")
+                print("="*60)
+            except Exception as e:
+                print(f"❌ Error: {e}")
             
-        elif choice == '4':
+        elif choice == '3':
             print("Goodbye!")
             break
         else:
             print("Invalid choice!")
-
-
-def batch_test():
-    """Test multiple emails from a CSV file"""
-    predictor = PhishingPredictor()
-    
-    if not predictor.load_models():
-        return
-    
-    csv_file = input("Enter CSV filename with emails to test: ")
-    
-    try:
-        df = pd.read_csv(csv_file)
-        print(f"Loaded {len(df)} emails")
-        
-        results = []
-        for idx, row in df.iterrows():
-            print(f"\nTesting email {idx+1}/{len(df)}...")
-            
-            email_data = predictor.prepare_email(
-                row.get('sender', 'unknown'),
-                row.get('subject', ''),
-                row.get('body', ''),
-                row.get('urls', '')
-            )
-            
-            result = predictor.predict_email(email_data)
-            results.append({
-                'index': idx,
-                'prediction': result['prediction'],
-                'confidence': result['confidence'],
-                'actual': row.get('label', 'unknown')
-            })
-        
-        # Save results
-        results_df = pd.DataFrame(results)
-        results_df.to_csv('prediction_results.csv', index=False)
-        print(f"\nResults saved to prediction_results.csv")
-        
-        # Show accuracy if labels are available
-        if 'actual' in results_df.columns and results_df['actual'].iloc[0] != 'unknown':
-            correct = sum(
-                (results_df['prediction'] == 'PHISHING') & (results_df['actual'].str.lower().isin(['phishing', 'spam', '1'])) |
-                (results_df['prediction'] == 'LEGITIMATE') & (results_df['actual'].str.lower().isin(['legitimate', 'ham', '0']))
-            )
-            accuracy = correct / len(results_df)
-            print(f"Accuracy: {accuracy:.1%}")
-            
-    except Exception as e:
-        print(f"Error: {e}")
 
 
 if __name__ == "__main__":
@@ -311,7 +435,7 @@ if __name__ == "__main__":
     print("1. Interactive mode (test individual emails)")
     print("2. Batch mode (test multiple emails from CSV)")
     
-    mode = input("\nEnter choice (1-2): ")
+    mode = input("\nEnter choice (1-2): ").strip()
     
     if mode == '1':
         interactive_mode()

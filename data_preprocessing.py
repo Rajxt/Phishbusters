@@ -1,3 +1,4 @@
+# data_preprocessing.py - FIXED VERSION with encoding handling
 import pandas as pd
 import numpy as np
 import pickle
@@ -9,9 +10,46 @@ class DataPreprocessor:
         self.vectorizer = None
 
     def load_and_clean_data(self, csv_file):
-        """Load and clean the email dataset"""
+        """Load and clean the email dataset with automatic encoding detection"""
         print("Loading and cleaning data...")
-        df = pd.read_csv(csv_file)
+        
+        # Try different encodings
+        encodings_to_try = ['utf-8', 'latin-1', 'windows-1252', 'iso-8859-1', 'cp1252']
+        
+        df = None
+        for encoding in encodings_to_try:
+            try:
+                df = pd.read_csv(csv_file, encoding=encoding)
+                print(f"✓ Successfully loaded file with {encoding} encoding")
+                break
+            except UnicodeDecodeError:
+                continue
+            except Exception as e:
+                print(f"Error with {encoding}: {e}")
+                continue
+        
+        if df is None:
+            # If all standard encodings fail, try with error handling
+            try:
+                df = pd.read_csv(csv_file, encoding='utf-8', errors='ignore')
+                print("Loaded file with UTF-8 encoding (ignoring errors)")
+            except Exception as e:
+                # Last resort: try to detect encoding
+                try:
+                    import chardet
+                    with open(csv_file, 'rb') as f:
+                        result = chardet.detect(f.read(100000))
+                        detected_encoding = result['encoding']
+                        print(f"Detected encoding: {detected_encoding}")
+                        df = pd.read_csv(csv_file, encoding=detected_encoding)
+                except ImportError:
+                    print("💡 Tip: Install chardet for better encoding detection: pip install chardet")
+                    # Final fallback
+                    df = pd.read_csv(csv_file, encoding='latin-1', errors='replace')
+                    print("Loaded with latin-1 encoding (with replacements)")
+                except Exception as e:
+                    raise ValueError(f"Failed to read CSV file: {e}")
+        
         print(f"Dataset shape: {df.shape}")
         print(f"Columns: {df.columns.tolist()}")
         print(f"Missing values:\n{df.isnull().sum()}")
@@ -35,6 +73,14 @@ class DataPreprocessor:
     def clean_text(self, df):
         """Clean and preprocess text fields"""
         print("Cleaning text data...")
+        
+        # Handle potential encoding issues in text
+        for col in ['subject', 'body']:
+            if col in df.columns:
+                # Clean any remaining encoding issues
+                df[col] = df[col].apply(lambda x: str(x).encode('ascii', 'ignore').decode('ascii') 
+                                        if pd.notna(x) else '')
+        
         df['subject_clean'] = (df['subject']
             .str.lower()
             .str.replace(r'http\S+', '', regex=True)
@@ -92,7 +138,7 @@ class DataPreprocessor:
             df['url_count'] = 0
             
         # Sender domain extraction
-        df['sender_domain'] = df['sender'].str.extract(r'@([^>]+)')
+        df['sender_domain'] = df['sender'].str.extract(r'@([^>]+)', expand=False)
         return df
 
     def check_label_distribution(self, df):
@@ -180,23 +226,63 @@ class DataPreprocessor:
         return balanced_df
 
     def save_processed_data(self, df, filename='processed_data.pkl'):
+        """Save processed data to pickle file"""
         with open(filename, 'wb') as f:
             pickle.dump(df, f)
         print(f"Processed data saved to {filename}")
 
+
 if __name__ == "__main__":
-    csv_file = "datasets/phishingdataset.csv"  # update this if needed
-    if not os.path.exists(csv_file):
-        print(f"❌ CSV file not found: {csv_file}")
-        exit()
+    # Test with your CSV file
+    csv_files_to_try = [
+        "sample.csv",
+        "datasets/phishingdataset.csv",
+        "phishingdataset.csv",
+        "datasets/sample.csv"
+    ]
     
+    csv_file = None
+    for file_path in csv_files_to_try:
+        if os.path.exists(file_path):
+            csv_file = file_path
+            print(f"Found CSV file: {csv_file}")
+            break
+    
+    if csv_file is None:
+        print("❌ No CSV file found. Please specify the correct path.")
+        print("Available CSV files in current directory:")
+        for f in os.listdir('.'):
+            if f.endswith('.csv'):
+                print(f"  - {f}")
+        
+        # Ask user for input
+        csv_file = input("\nEnter the path to your CSV file: ").strip()
+        if not os.path.exists(csv_file):
+            print(f"❌ File not found: {csv_file}")
+            exit()
+    
+    # Process the data
     preprocessor = DataPreprocessor()
-    df = preprocessor.load_and_clean_data(csv_file)
-    df = preprocessor.clean_text(df)
-    df = preprocessor.extract_basic_features(df)
     
-    # Check labels and balance if needed
-    df_balanced = preprocessor.balance_dataset_intelligently(df)
-    
-    preprocessor.save_processed_data(df_balanced)
-    print("\n✅ Preprocessing complete!")
+    try:
+        df = preprocessor.load_and_clean_data(csv_file)
+        df = preprocessor.clean_text(df)
+        df = preprocessor.extract_basic_features(df)
+        
+        # Check labels and balance if needed
+        df_balanced = preprocessor.balance_dataset_intelligently(df)
+        
+        # Save processed data
+        preprocessor.save_processed_data(df_balanced)
+        print("\n✅ Preprocessing complete!")
+        
+        # Show sample of processed data
+        print("\nSample of processed data:")
+        print(df_balanced[['subject_clean', 'label']].head())
+        
+    except Exception as e:
+        print(f"❌ Error during processing: {e}")
+        print("\nTroubleshooting tips:")
+        print("1. Make sure your CSV has these columns: subject, body, sender, label")
+        print("2. Label column should contain 0 (legitimate) and 1 (phishing)")
+        print("3. Try installing chardet: pip install chardet")
