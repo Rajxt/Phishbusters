@@ -305,19 +305,45 @@ def batch_test():
         
         if total_predictions > 0:
             accuracy = (correct_predictions / total_predictions) * 100
-            print(f"\nAccuracy: {accuracy:.1f}% ({correct_predictions}/{total_predictions} correct)")
             
-            # Show confusion matrix
-            phishing_correct = sum(1 for r in results if r.get('actual') == 'PHISHING' and r['prediction'] == 'PHISHING')
-            phishing_wrong = sum(1 for r in results if r.get('actual') == 'PHISHING' and r['prediction'] == 'LEGITIMATE')
-            legit_correct = sum(1 for r in results if r.get('actual') == 'LEGITIMATE' and r['prediction'] == 'LEGITIMATE')
-            legit_wrong = sum(1 for r in results if r.get('actual') == 'LEGITIMATE' and r['prediction'] == 'PHISHING')
+            # Calculate confusion matrix components
+            true_positive = sum(1 for r in results if r.get('actual') == 'PHISHING' and r['prediction'] == 'PHISHING')  # TP
+            false_negative = sum(1 for r in results if r.get('actual') == 'PHISHING' and r['prediction'] == 'LEGITIMATE')  # FN
+            true_negative = sum(1 for r in results if r.get('actual') == 'LEGITIMATE' and r['prediction'] == 'LEGITIMATE')  # TN
+            false_positive = sum(1 for r in results if r.get('actual') == 'LEGITIMATE' and r['prediction'] == 'PHISHING')  # FP
             
-            print("\nConfusion Matrix:")
-            print("                 Predicted")
-            print("                 Legit  Phish")
-            print(f"Actual Legit  |  {legit_correct:4d}  {legit_wrong:4d}")
-            print(f"       Phish  |  {phishing_wrong:4d}  {phishing_correct:4d}")
+            # Calculate metrics
+            precision = true_positive / (true_positive + false_positive) if (true_positive + false_positive) > 0 else 0
+            recall = true_positive / (true_positive + false_negative) if (true_positive + false_negative) > 0 else 0
+            f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+            
+            # False Positive Rate and False Negative Rate
+            fpr = false_positive / (false_positive + true_negative) if (false_positive + true_negative) > 0 else 0
+            fnr = false_negative / (false_negative + true_positive) if (false_negative + true_positive) > 0 else 0
+            
+            # Display Results
+            print(f"\n📈 PERFORMANCE METRICS")
+            print("-" * 60)
+            print(f"Accuracy:        {accuracy:.1f}% ({correct_predictions}/{total_predictions} correct)")
+            print(f"Precision:       {precision:.3f} ({precision*100:.1f}%)")
+            print(f"Recall:          {recall:.3f} ({recall*100:.1f}%)")
+            print(f"F1-Score:        {f1_score:.3f}")
+            print(f"FP Rate:         {fpr:.3f} ({fpr*100:.1f}%)")
+            print(f"FN Rate:         {fnr:.3f} ({fnr*100:.1f}%)")
+            
+            print("\n📊 CONFUSION MATRIX")
+            print("-" * 60)
+            print("                    Predicted")
+            print("                 Legit      Phish")
+            print(f"Actual Legit  |  {true_negative:4d} (TN)  {false_positive:4d} (FP)")
+            print(f"       Phish  |  {false_negative:4d} (FN)  {true_positive:4d} (TP)")
+            
+            print("\n📉 ERROR ANALYSIS")
+            print("-" * 60)
+            print(f"True Positives (TP):   {true_positive:3d} - Correctly identified phishing")
+            print(f"True Negatives (TN):   {true_negative:3d} - Correctly identified legitimate")
+            print(f"False Positives (FP):  {false_positive:3d} - Legitimate marked as phishing")
+            print(f"False Negatives (FN):  {false_negative:3d} - Phishing marked as legitimate ⚠️")
         else:
             print("\n⚠️  No labeled data found - cannot calculate accuracy")
         
