@@ -357,13 +357,7 @@ def batch_test():
             legit_pred = sum(1 for r in results if r['prediction'] == 'LEGITIMATE')
             print(f"\nPredictions: {phishing_pred} Phishing, {legit_pred} Legitimate")
             
-            # Show some examples
-            print("\nSample predictions (first 5):")
-            for i in range(min(5, len(results))):
-                r = results[i]
-                actual_str = f" | Actual: {r.get('actual', 'unknown'):10s}" if 'actual' in r else ""
-                print(f"  {i+1}. {r['subject'][:40]:40s} → {r['prediction']:10s} (Conf: {r['confidence']:.1%}){actual_str}")
-        
+           
         # Show errors if any
         if errors:
             print(f"\n⚠️  {len(errors)} errors occurred during processing")

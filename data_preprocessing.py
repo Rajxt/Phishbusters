@@ -1,288 +1,378 @@
-# data_preprocessing.py - FIXED VERSION with encoding handling
+# data_preprocessing.py - Multi-Dataset Support
+"""
+Enhanced Data Preprocessor for Phishing Detection
+Supports loading and combining multiple datasets with different formats
+"""
+
 import pandas as pd
 import numpy as np
+import re
 import pickle
-import os
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 class DataPreprocessor:
     def __init__(self):
         self.vectorizer = None
-
-    def load_and_clean_data(self, csv_file):
-        """Load and clean the email dataset with automatic encoding detection"""
-        print("Loading and cleaning data...")
+        self.dataset_info = {}
+    
+    def detect_dataset_format(self, df, dataset_name="unknown"):
+        """
+        Automatically detect the format and columns of a dataset
+        """
+        print(f"\n📊 Analyzing dataset: {dataset_name}")
+        print(f"   Shape: {df.shape}")
+        print(f"   Columns: {df.columns.tolist()}")
         
-        # Try different encodings
-        encodings_to_try = ['utf-8', 'latin-1', 'windows-1252', 'iso-8859-1', 'cp1252']
+        # Common column name variations
+        subject_cols = ['subject', 'Subject', 'SUBJECT', 'email_subject', 'mail_subject']
+        body_cols = ['body', 'Body', 'BODY', 'content', 'text', 'message', 'email_body', 'mail_body']
+        sender_cols = ['sender', 'from', 'From', 'FROM', 'email_from', 'sender_email']
+        label_cols = ['label', 'Label', 'LABEL', 'class', 'target', 'spam', 'is_phishing', 'phishing']
         
-        df = None
-        for encoding in encodings_to_try:
-            try:
-                df = pd.read_csv(csv_file, encoding=encoding)
-                print(f"✓ Successfully loaded file with {encoding} encoding")
-                break
-            except UnicodeDecodeError:
-                continue
-            except Exception as e:
-                print(f"Error with {encoding}: {e}")
-                continue
+        detected = {
+            'subject': None,
+            'body': None,
+            'sender': None,
+            'label': None
+        }
         
-        if df is None:
-            # If all standard encodings fail, try with error handling
-            try:
-                df = pd.read_csv(csv_file, encoding='utf-8', errors='ignore')
-                print("Loaded file with UTF-8 encoding (ignoring errors)")
-            except Exception as e:
-                # Last resort: try to detect encoding
-                try:
-                    import chardet
-                    with open(csv_file, 'rb') as f:
-                        result = chardet.detect(f.read(100000))
-                        detected_encoding = result['encoding']
-                        print(f"Detected encoding: {detected_encoding}")
-                        df = pd.read_csv(csv_file, encoding=detected_encoding)
-                except ImportError:
-                    print("💡 Tip: Install chardet for better encoding detection: pip install chardet")
-                    # Final fallback
-                    df = pd.read_csv(csv_file, encoding='latin-1', errors='replace')
-                    print("Loaded with latin-1 encoding (with replacements)")
-                except Exception as e:
-                    raise ValueError(f"Failed to read CSV file: {e}")
+        # Detect columns
+        for col in df.columns:
+            if col in subject_cols:
+                detected['subject'] = col
+            elif col in body_cols:
+                detected['body'] = col
+            elif col in sender_cols:
+                detected['sender'] = col
+            elif col in label_cols:
+                detected['label'] = col
         
-        print(f"Dataset shape: {df.shape}")
-        print(f"Columns: {df.columns.tolist()}")
-        print(f"Missing values:\n{df.isnull().sum()}")
-
-        # Handle missing values
-        df['subject'] = df['subject'].fillna('no_subject').replace('', 'no_subject')
-        df['body'] = df['body'].fillna('no_body').replace('', 'no_body')
-        df['sender'] = df['sender'].fillna('unknown_sender')
+        # If no exact match, try fuzzy matching
+        if detected['subject'] is None:
+            for col in df.columns:
+                if 'subject' in col.lower():
+                    detected['subject'] = col
+                    break
         
-        # Ensure label column exists and is properly formatted
-        if 'label' not in df.columns:
-            raise ValueError("Dataset must have a 'label' column")
-            
-        # Convert labels to integers if they're not already
-        df['label'] = pd.to_numeric(df['label'], errors='coerce')
-        df = df.dropna(subset=['label'])  # Remove rows with invalid labels
-        df['label'] = df['label'].astype(int)
+        if detected['body'] is None:
+            for col in df.columns:
+                if any(keyword in col.lower() for keyword in ['body', 'content', 'text', 'message']):
+                    detected['body'] = col
+                    break
         
-        return df
-
-    def clean_text(self, df):
-        """Clean and preprocess text fields"""
-        print("Cleaning text data...")
+        if detected['sender'] is None:
+            for col in df.columns:
+                if any(keyword in col.lower() for keyword in ['sender', 'from', 'email']):
+                    detected['sender'] = col
+                    break
         
-        # Handle potential encoding issues in text
-        for col in ['subject', 'body']:
-            if col in df.columns:
-                # Clean any remaining encoding issues
-                df[col] = df[col].apply(lambda x: str(x).encode('ascii', 'ignore').decode('ascii') 
-                                        if pd.notna(x) else '')
+        if detected['label'] is None:
+            for col in df.columns:
+                if any(keyword in col.lower() for keyword in ['label', 'class', 'spam', 'phish', 'target']):
+                    detected['label'] = col
+                    break
         
-        df['subject_clean'] = (df['subject']
-            .str.lower()
-            .str.replace(r'http\S+', '', regex=True)
-            .str.replace(r'\S+@\S+', '', regex=True)
-            .str.replace(r'[^a-zA-Z\s]', '', regex=True)
-            .str.replace(r'\s+', ' ', regex=True)
-            .str.strip())
+        print(f"   Detected columns:")
+        for key, value in detected.items():
+            status = f"✓ {value}" if value else "✗ Not found"
+            print(f"      {key}: {status}")
         
-        df['body_clean'] = (df['body']
-            .str.lower()
-            .str.replace(r'http\S+', '', regex=True)
-            .str.replace(r'\S+@\S+', '', regex=True)
-            .str.replace(r'[^a-zA-Z\s]', '', regex=True)
-            .str.replace(r'\s+', ' ', regex=True)
-            .str.strip())
-
-        df['combined_text'] = df['subject_clean'] + ' ' + df['body_clean']
-
-        # Remove very short messages
-        df = df[df['combined_text'].str.len() >= 5].reset_index(drop=True)
-        return df
-
-    def create_tfidf_features(self, text_data):
-        """Create TF-IDF features from text data"""
-        print("Creating TF-IDF features...")
+        return detected
+    
+    def standardize_dataset(self, df, dataset_name="unknown"):
+        """
+        Standardize a dataset to common column names
+        """
+        detected = self.detect_dataset_format(df, dataset_name)
         
-        if self.vectorizer is None:
-            # Create and fit new vectorizer
-            self.vectorizer = TfidfVectorizer(
-                max_features=1000,
-                stop_words='english',
-                ngram_range=(1, 2),
-                min_df=2
-            )
-            X_tfidf = self.vectorizer.fit_transform(text_data)
+        standardized_df = pd.DataFrame()
+        
+        # Map to standard column names
+        if detected['subject']:
+            standardized_df['subject'] = df[detected['subject']].fillna('')
         else:
-            # Use existing vectorizer (for test data)
-            X_tfidf = self.vectorizer.transform(text_data)
+            standardized_df['subject'] = ''
         
-        print(f"TF-IDF matrix shape: {X_tfidf.shape}")
-        return X_tfidf
-
-    def extract_basic_features(self, df):
-        """Extract basic numerical features"""
-        print("Extracting basic features...")
-        df['subject_length'] = df['subject_clean'].str.len()
-        df['body_length'] = df['body_clean'].str.len()
-        df['total_length'] = df['subject_length'] + df['body_length']
-        df['exclamation_count'] = df['combined_text'].str.count('!')
-        
-        # Robust URL count extraction
-        if 'urls' in df.columns:
-            df['url_count'] = df['urls'].replace('', 0).fillna(0).astype(str).str.count('http|www')
+        if detected['body']:
+            standardized_df['body'] = df[detected['body']].fillna('')
         else:
-            df['url_count'] = 0
-            
-        # Sender domain extraction
-        df['sender_domain'] = df['sender'].str.extract(r'@([^>]+)', expand=False)
-        return df
-
-    def check_label_distribution(self, df):
-        """Check and report label distribution"""
-        print("\n" + "="*40)
-        print("LABEL DISTRIBUTION ANALYSIS")
-        print("="*40)
+            standardized_df['body'] = ''
         
-        if 'label' not in df.columns:
-            print("❌ No 'label' column found!")
-            return False
+        if detected['sender']:
+            standardized_df['sender'] = df[detected['sender']].fillna('unknown@example.com')
+        else:
+            standardized_df['sender'] = 'unknown@example.com'
+        
+        # Handle labels - this is critical
+        if detected['label']:
+            standardized_df['label'] = df[detected['label']]
+        else:
+            print(f"   ⚠️ WARNING: No label column found in {dataset_name}")
+            standardized_df['label'] = -1  # Mark as unlabeled
+        
+        # Add dataset source for tracking
+        standardized_df['dataset_source'] = dataset_name
+        
+        # Add URLs column (empty by default)
+        standardized_df['urls'] = ''
+        
+        return standardized_df
+    
+    def normalize_labels(self, df):
+        """
+        Normalize labels to binary: 1 = phishing, 0 = legitimate
+        Handles various label formats
+        """
+        print("\n🏷️  Normalizing labels across datasets...")
+        
+        def convert_label(label):
+            """Convert various label formats to binary"""
+            label_str = str(label).lower().strip()
             
+            # Phishing indicators
+            phishing_labels = ['1', 'phishing', 'spam', 'true', 'yes', 'phish', 'malicious']
+            if label_str in phishing_labels:
+                return 1
+            
+            # Legitimate indicators
+            legitimate_labels = ['0', 'legitimate', 'ham', 'false', 'no', 'legit', 'safe']
+            if label_str in legitimate_labels:
+                return 0
+            
+            # Try numeric conversion
+            try:
+                numeric_val = float(label_str)
+                return 1 if numeric_val > 0.5 else 0
+            except:
+                pass
+            
+            # Default to -1 for unknown
+            return -1
+        
+        # Convert labels
+        df['label'] = df['label'].apply(convert_label)
+        
+        # Remove unlabeled data
+        unlabeled_count = (df['label'] == -1).sum()
+        if unlabeled_count > 0:
+            print(f"   ⚠️ Removing {unlabeled_count} unlabeled rows")
+            df = df[df['label'] != -1].reset_index(drop=True)
+        
+        # Show label distribution
         label_counts = df['label'].value_counts().sort_index()
-        print(f"Label distribution:")
+        print(f"\n   Label distribution after normalization:")
         for label, count in label_counts.items():
             label_name = "Phishing" if label == 1 else "Legitimate"
             percentage = (count / len(df)) * 100
-            print(f"  {label} ({label_name}): {count} emails ({percentage:.1f}%)")
+            print(f"      {label} ({label_name}): {count:,} ({percentage:.1f}%)")
         
-        total_classes = df['label'].nunique()
-        print(f"\nTotal classes: {total_classes}")
+        return df
+    
+    def load_and_combine_datasets(self, dataset_configs):
+        """
+        Load and combine multiple datasets
         
-        if total_classes == 1:
-            print("⚠️  WARNING: Only one class found in the dataset!")
-            print("   This will prevent proper training. You need both phishing and legitimate emails.")
-            return False
-        elif total_classes == 2:
-            print("✅ Good: Both classes present for training.")
-            return True
+        Args:
+            dataset_configs: List of tuples (file_path, dataset_name)
+        """
+        print("="*60)
+        print("LOADING AND COMBINING DATASETS")
+        print("="*60)
+        
+        all_dataframes = []
+        
+        for file_path, dataset_name in dataset_configs:
+            try:
+                print(f"\n📂 Loading: {dataset_name} from {file_path}")
+                
+                # Try different encodings
+                encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
+                df = None
+                
+                for encoding in encodings:
+                    try:
+                        df = pd.read_csv(file_path, encoding=encoding, low_memory=False)
+                        print(f"   ✓ Loaded with {encoding} encoding")
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                    except Exception as e:
+                        print(f"   Error with {encoding}: {str(e)[:50]}")
+                        continue
+                
+                if df is None:
+                    print(f"   ✗ Failed to load {dataset_name}")
+                    continue
+                
+                print(f"   Rows: {len(df):,}")
+                
+                # Standardize the dataset
+                standardized_df = self.standardize_dataset(df, dataset_name)
+                
+                # Store info
+                self.dataset_info[dataset_name] = {
+                    'rows': len(standardized_df),
+                    'file': file_path
+                }
+                
+                all_dataframes.append(standardized_df)
+                print(f"   ✓ {dataset_name} standardized successfully")
+                
+            except Exception as e:
+                print(f"   ✗ Error loading {dataset_name}: {e}")
+                continue
+        
+        if not all_dataframes:
+            raise ValueError("No datasets were successfully loaded!")
+        
+        # Combine all datasets
+        print(f"\n🔗 Combining {len(all_dataframes)} datasets...")
+        combined_df = pd.concat(all_dataframes, ignore_index=True)
+        
+        # Normalize labels across all datasets
+        combined_df = self.normalize_labels(combined_df)
+        
+        # Remove duplicates based on subject and body
+        print(f"\n🧹 Removing duplicates...")
+        original_count = len(combined_df)
+        combined_df = combined_df.drop_duplicates(subset=['subject', 'body'], keep='first')
+        duplicates_removed = original_count - len(combined_df)
+        print(f"   Removed {duplicates_removed:,} duplicate emails")
+        
+        print(f"\n✅ Combined dataset created:")
+        print(f"   Total emails: {len(combined_df):,}")
+        
+        # Show breakdown by dataset source
+        print(f"\n   Breakdown by source:")
+        for source, count in combined_df['dataset_source'].value_counts().items():
+            percentage = (count / len(combined_df)) * 100
+            print(f"      {source}: {count:,} ({percentage:.1f}%)")
+        
+        return combined_df
+    
+    def load_and_clean_data(self, csv_file):
+        """Load and clean a single dataset (backward compatible)"""
+        print(f"Loading data from {csv_file}...")
+        
+        # Try different encodings
+        encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252']
+        df = None
+        
+        for encoding in encodings:
+            try:
+                df = pd.read_csv(csv_file, encoding=encoding, low_memory=False)
+                break
+            except:
+                continue
+        
+        if df is None:
+            raise ValueError(f"Could not load {csv_file} with any encoding")
+        
+        # Standardize
+        dataset_name = csv_file.split('/')[-1].replace('.csv', '')
+        df = self.standardize_dataset(df, dataset_name)
+        df = self.normalize_labels(df)
+        
+        print(f"✓ Loaded {len(df)} emails")
+        return df
+    
+    def clean_text(self, df):
+        """Clean and preprocess text"""
+        print("Cleaning text...")
+        
+        # Clean subject
+        df['subject_clean'] = df['subject'].apply(self._clean_text_field)
+        
+        # Clean body
+        df['body_clean'] = df['body'].apply(self._clean_text_field)
+        
+        # Combine subject and body
+        df['combined_text'] = df['subject_clean'] + ' ' + df['body_clean']
+        
+        print(f"✓ Text cleaned")
+        return df
+    
+    def _clean_text_field(self, text):
+        """Clean individual text field"""
+        if pd.isna(text):
+            return ''
+        
+        text = str(text)
+        
+        # Remove HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Remove URLs (but keep their presence for url_count feature)
+        text = re.sub(r'http[s]?://\S+', '', text)
+        
+        # Remove email addresses
+        text = re.sub(r'\S+@\S+', '', text)
+        
+        # Remove special characters but keep basic punctuation
+        text = re.sub(r'[^a-zA-Z0-9\s!?.,]', ' ', text)
+        
+        # Remove extra whitespace
+        text = ' '.join(text.split())
+        
+        # Convert to lowercase
+        text = text.lower()
+        
+        return text
+    
+    def extract_basic_features(self, df):
+        """Extract basic numerical features"""
+        print("Extracting features...")
+        
+        df['subject_length'] = df['subject'].fillna('').apply(len)
+        df['body_length'] = df['body'].fillna('').apply(len)
+        df['url_count'] = df['body'].fillna('').apply(lambda x: len(re.findall(r'http[s]?://', str(x))))
+        df['exclamation_count'] = df['body'].fillna('').apply(lambda x: str(x).count('!'))
+        
+        print(f"✓ Features extracted")
+        return df
+    
+    def create_tfidf_features(self, text_series):
+        """Create TF-IDF features"""
+        if self.vectorizer is None:
+            self.vectorizer = TfidfVectorizer(
+                max_features=1000,
+                ngram_range=(1, 2),
+                min_df=2,
+                max_df=0.95
+            )
+            X = self.vectorizer.fit_transform(text_series)
         else:
-            print(f"⚠️  WARNING: {total_classes} classes found. Expected 2 (phishing/legitimate).")
-            return False
-
-    def balance_dataset_intelligently(self, df, max_ratio=3.0):
-        """
-        Intelligently balance the dataset without creating artificial data
-        max_ratio: maximum allowed ratio between majority and minority class
-        """
-        print("\n" + "="*40)
-        print("DATASET BALANCING")
-        print("="*40)
+            X = self.vectorizer.transform(text_series)
         
-        if not self.check_label_distribution(df):
-            return df
-        
-        class_counts = df['label'].value_counts()
-        majority_count = class_counts.max()
-        minority_count = class_counts.min()
-        current_ratio = majority_count / minority_count
-        
-        print(f"Current class ratio: {current_ratio:.2f}:1")
-        
-        if current_ratio <= max_ratio:
-            print("✅ Dataset is reasonably balanced. No changes needed.")
-            return df
-        
-        print(f"Dataset is imbalanced (ratio > {max_ratio}:1). Applying intelligent balancing...")
-        
-        # Find majority and minority classes
-        majority_class = class_counts.idxmax()
-        minority_class = class_counts.idxmin()
-        
-        # Calculate target counts
-        target_majority_count = int(minority_count * max_ratio)
-        
-        print(f"Downsampling majority class ({majority_class}) from {majority_count} to {target_majority_count}")
-        
-        # Separate classes
-        minority_df = df[df['label'] == minority_class]
-        majority_df = df[df['label'] == majority_class]
-        
-        # Downsample majority class
-        majority_df_downsampled = majority_df.sample(n=target_majority_count, random_state=42)
-        
-        # Combine
-        balanced_df = pd.concat([minority_df, majority_df_downsampled], ignore_index=True)
-        balanced_df = balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
-        
-        print(f"✅ Balanced dataset created:")
-        print(f"   Class {minority_class}: {len(minority_df)} emails")
-        print(f"   Class {majority_class}: {len(majority_df_downsampled)} emails")
-        print(f"   Total: {len(balanced_df)} emails")
-        print(f"   New ratio: {len(majority_df_downsampled)/len(minority_df):.2f}:1")
-        
-        return balanced_df
-
-    def save_processed_data(self, df, filename='processed_data.pkl'):
-        """Save processed data to pickle file"""
+        return X
+    
+    def save_processed_data(self, df, filename='processed_combined_data.pkl'):
+        """Save processed data"""
         with open(filename, 'wb') as f:
             pickle.dump(df, f)
-        print(f"Processed data saved to {filename}")
-
+        print(f"✓ Processed data saved to {filename}")
 
 if __name__ == "__main__":
-    # Test with your CSV file
-    csv_files_to_try = [
-        "sample.csv",
-        "datasets/phishingdataset.csv",
-        "phishingdataset.csv",
-        "datasets/sample.csv"
-    ]
-    
-    csv_file = None
-    for file_path in csv_files_to_try:
-        if os.path.exists(file_path):
-            csv_file = file_path
-            print(f"Found CSV file: {csv_file}")
-            break
-    
-    if csv_file is None:
-        print("❌ No CSV file found. Please specify the correct path.")
-        print("Available CSV files in current directory:")
-        for f in os.listdir('.'):
-            if f.endswith('.csv'):
-                print(f"  - {f}")
-        
-        # Ask user for input
-        csv_file = input("\nEnter the path to your CSV file: ").strip()
-        if not os.path.exists(csv_file):
-            print(f"❌ File not found: {csv_file}")
-            exit()
-    
-    # Process the data
+    # Test the preprocessor
     preprocessor = DataPreprocessor()
     
-    try:
-        df = preprocessor.load_and_clean_data(csv_file)
+    # Example: Load multiple datasets
+    dataset_configs = [
+        ('datasets/enron.csv', 'Enron'),
+        ('datasets/ling.csv', 'Ling'),
+        ('datasets/nazario.csv', 'Nazario'),
+        ('datasets/phisingdataset.csv', 'Phishing'),
+    ]
+    
+    # Check which exist
+    import os
+    available = [(f, n) for f, n in dataset_configs if os.path.exists(f)]
+    
+    if available:
+        df = preprocessor.load_and_combine_datasets(available)
         df = preprocessor.clean_text(df)
         df = preprocessor.extract_basic_features(df)
-        
-        # Check labels and balance if needed
-        df_balanced = preprocessor.balance_dataset_intelligently(df)
-        
-        # Save processed data
-        preprocessor.save_processed_data(df_balanced)
+        preprocessor.save_processed_data(df)
         print("\n✅ Preprocessing complete!")
-        
-        # Show sample of processed data
-        print("\nSample of processed data:")
-        print(df_balanced[['subject_clean', 'label']].head())
-        
-    except Exception as e:
-        print(f"❌ Error during processing: {e}")
-        print("\nTroubleshooting tips:")
-        print("1. Make sure your CSV has these columns: subject, body, sender, label")
-        print("2. Label column should contain 0 (legitimate) and 1 (phishing)")
-        print("3. Try installing chardet: pip install chardet")
+    else:
+        print("❌ No datasets found!")
